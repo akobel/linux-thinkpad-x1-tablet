@@ -157,9 +157,7 @@ DefinitionBlock ("", "DSDT", 2, "LENOVO", "SKL     ", 0x00000000)
     Name (SS1, 0x00)
     Name (SS2, 0x00)
     Name (SS3, One)
-    One
     Name (SS4, One)
-    One
     OperationRegion (GNVS, SystemMemory, 0xBFF4F000, 0x072C)
     Field (GNVS, AnyAcc, Lock, Preserve)
     {
