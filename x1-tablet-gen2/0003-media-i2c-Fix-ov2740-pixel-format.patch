@@ -1,0 +1,55 @@
+From 7c5ecf2ae9ecbb6a85c9439ca28ee38fbe5cc1fd Mon Sep 17 00:00:00 2001
+From: Alexander Kobel <a-kobel@a-kobel.de>
+Date: Mon, 2 May 2022 00:03:28 +0200
+Subject: [PATCH 3/3] media: i2c: Fix ov2740 pixel format
+
+Omnivision OV2740 uses BG/GR 10-bit format, not GR/BG.
+
+Signed-off-by: Alexander Kobel <a-kobel@a-kobel.de>
+---
+ drivers/media/i2c/ov2740.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/i2c/ov2740.c b/drivers/media/i2c/ov2740.c
+index fc1b1434e7cb..9ad1554f6e38 100644
+--- a/drivers/media/i2c/ov2740.c
++++ b/drivers/media/i2c/ov2740.c
+@@ -21,6 +21,8 @@
+ #define OV2740_DATA_LANES		2
+ #define OV2740_RGB_DEPTH		10
+ 
++#define OV2740_MEDIA_BUS_FMT MEDIA_BUS_FMT_SBGGR10_1X10
++
+ #define OV2740_REG_CHIP_ID		0x300a
+ #define OV2740_CHIP_ID			0x2740
+ 
+@@ -684,7 +686,7 @@ static void ov2740_update_pad_format(const struct ov2740_mode *mode,
+ {
+ 	fmt->width = mode->width;
+ 	fmt->height = mode->height;
+-	fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
++	fmt->code = OV2740_MEDIA_BUS_FMT;
+ 	fmt->field = V4L2_FIELD_NONE;
+ }
+ 
+@@ -1030,7 +1032,7 @@ static int ov2740_enum_mbus_code(struct v4l2_subdev *sd,
+ 	if (code->index > 0)
+ 		return -EINVAL;
+ 
+-	code->code = MEDIA_BUS_FMT_SGRBG10_1X10;
++	code->code = OV2740_MEDIA_BUS_FMT;
+ 
+ 	return 0;
+ }
+@@ -1042,7 +1044,7 @@ static int ov2740_enum_frame_size(struct v4l2_subdev *sd,
+ 	if (fse->index >= ARRAY_SIZE(supported_modes))
+ 		return -EINVAL;
+ 
+-	if (fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
++	if (fse->code != OV2740_MEDIA_BUS_FMT)
+ 		return -EINVAL;
+ 
+ 	fse->min_width = supported_modes[fse->index].width;
+-- 
+2.36.0
+
