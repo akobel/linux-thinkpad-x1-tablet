@@ -1,0 +1,119 @@
+From 1ca9943fbff1a09ad7f6866b988bd75281b676e5 Mon Sep 17 00:00:00 2001
+From: Alexander Kobel <a-kobel@a-kobel.de>
+Date: Sun, 1 May 2022 13:47:55 +0200
+Subject: [PATCH 2/2] platform/x86: int3472: Add board data for ThinkPad X1
+ Tablet Gen 1
+
+Changes over Lenovo's ThinkPad X1 Tablet Gen 2:
+- INT3472:05 -> INT3472:04
+- INT3474:01 -> INT3474:00
+as reported in
+https://github.com/akobel/linux-thinkpad-x1-tablet/issues/1#issuecomment-1072860171
+
+Signed-off-by: Alexander Kobel <a-kobel@a-kobel.de>
+---
+ .../x86/intel/int3472/tps68470_board_data.c   | 81 +++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+
+diff --git a/drivers/platform/x86/intel/int3472/tps68470_board_data.c b/drivers/platform/x86/intel/int3472/tps68470_board_data.c
+index d5d45eeb326d..d4c9d33a4334 100644
+--- a/drivers/platform/x86/intel/int3472/tps68470_board_data.c
++++ b/drivers/platform/x86/intel/int3472/tps68470_board_data.c
+@@ -139,6 +139,80 @@ static const struct int3472_tps68470_board_data surface_go3_tps68470_board_data
+ 	}
+ };
+ 
++/* Lenovo Thinkpad X1 Tablet Gen1 */
++
++static struct regulator_consumer_supply thinkpad_x1_tablet_gen1_int3474_vsio_consumer_supplies[] = {
++	REGULATOR_SUPPLY("dovdd", "i2c-INT3474:00"),
++};
++
++static struct regulator_consumer_supply thinkpad_x1_tablet_gen1_int3474_aux1_consumer_supplies[] = {
++	REGULATOR_SUPPLY("dvdd", "i2c-INT3474:00"),
++};
++
++static struct regulator_consumer_supply thinkpad_x1_tablet_gen1_int3474_aux2_consumer_supplies[] = {
++	REGULATOR_SUPPLY("avdd", "i2c-INT3474:00"),
++};
++
++static const struct regulator_init_data thinkpad_x1_tablet_gen1_tps68470_vsio_reg_init_data = {
++	.constraints = {
++		.min_uV = 1800600,
++		.max_uV = 1800600,
++		.apply_uV = 1,
++		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
++	},
++	.num_consumer_supplies = ARRAY_SIZE(thinkpad_x1_tablet_gen1_int3474_vsio_consumer_supplies),
++	.consumer_supplies = thinkpad_x1_tablet_gen1_int3474_vsio_consumer_supplies,
++};
++
++static const struct regulator_init_data thinkpad_x1_tablet_gen1_tps68470_aux1_reg_init_data = {
++	.constraints = {
++		.min_uV = 1213200,
++		.max_uV = 1213200,
++		.apply_uV = 1,
++		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
++	},
++	.num_consumer_supplies = ARRAY_SIZE(thinkpad_x1_tablet_gen1_int3474_aux1_consumer_supplies),
++	.consumer_supplies = thinkpad_x1_tablet_gen1_int3474_aux1_consumer_supplies,
++};
++
++static const struct regulator_init_data thinkpad_x1_tablet_gen1_tps68470_aux2_reg_init_data = {
++	.constraints = {
++		.min_uV = 1800600,
++		.max_uV = 1800600,
++		.apply_uV = 1,
++		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
++	},
++	.num_consumer_supplies = ARRAY_SIZE(thinkpad_x1_tablet_gen1_int3474_aux2_consumer_supplies),
++	.consumer_supplies = thinkpad_x1_tablet_gen1_int3474_aux2_consumer_supplies,
++};
++
++static const struct tps68470_regulator_platform_data thinkpad_x1_tablet_gen1_tps68470_pdata = {
++	.reg_init_data = {
++		[TPS68470_VSIO] = &thinkpad_x1_tablet_gen1_tps68470_vsio_reg_init_data,
++		[TPS68470_AUX1] = &thinkpad_x1_tablet_gen1_tps68470_aux1_reg_init_data,
++		[TPS68470_AUX2] = &thinkpad_x1_tablet_gen1_tps68470_aux2_reg_init_data,
++	}
++};
++
++static struct gpiod_lookup_table thinkpad_x1_tablet_gen1_int3474_gpios = {
++	.dev_id = "i2c-INT3474:00",
++	.table = {
++		GPIO_LOOKUP("tps68470-gpio", 4, "reset", GPIO_ACTIVE_LOW),
++		GPIO_LOOKUP("tps68470-gpio", 5, "powerdown", GPIO_ACTIVE_LOW),
++		GPIO_LOOKUP("tps68470-gpio", 6, "powerdown2", GPIO_ACTIVE_LOW),
++		{ }
++	}
++};
++
++static const struct int3472_tps68470_board_data thinkpad_x1_tablet_gen1_tps68470_board_data = {
++	.dev_name = "i2c-INT3472:04",
++	.tps68470_regulator_pdata = &thinkpad_x1_tablet_gen1_tps68470_pdata,
++	.n_gpiod_lookups = 1,
++	.tps68470_gpio_lookup_tables = {
++		&thinkpad_x1_tablet_gen1_int3474_gpios,
++	}
++};
++
+ /* Lenovo Thinkpad X1 Tablet Gen2 */
+ 
+ static struct regulator_consumer_supply thinkpad_x1_tablet_gen2_int3474_vsio_consumer_supplies[] = {
+@@ -235,6 +309,13 @@ static const struct dmi_system_id int3472_tps68470_board_data_table[] = {
+ 		},
+ 		.driver_data = (void *)&surface_go3_tps68470_board_data,
+ 	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_FAMILY, "ThinkPad X1 Tablet"),
++		},
++		.driver_data = (void *)&thinkpad_x1_tablet_gen1_tps68470_board_data,
++	},
+ 	{
+ 		.matches = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+-- 
+2.36.0
+
