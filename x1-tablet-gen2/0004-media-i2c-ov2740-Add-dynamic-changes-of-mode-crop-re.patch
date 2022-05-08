@@ -1,0 +1,308 @@
+From be2fca0892021d382e2d11ca67e38883abb3a05a Mon Sep 17 00:00:00 2001
+From: Alexander Kobel <a-kobel@a-kobel.de>
+Date: Sun, 8 May 2022 23:40:25 +0200
+Subject: [PATCH 4/4] media/i2c: ov2740: Add dynamic changes of mode/crop/reg
+ without reboot
+
+Don't you dare to use this for real.
+
+Signed-off-by: Alexander Kobel <a-kobel@a-kobel.de>
+---
+ drivers/media/i2c/ov2740.c | 202 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 197 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/i2c/ov2740.c b/drivers/media/i2c/ov2740.c
+index 9ad1554f6e38..61d50bf2e180 100644
+--- a/drivers/media/i2c/ov2740.c
++++ b/drivers/media/i2c/ov2740.c
+@@ -1,6 +1,11 @@
+ // SPDX-License-Identifier: GPL-2.0
+ // Copyright (c) 2020 Intel Corporation.
+ 
++#define DEBUG_WRITE_REG_FROM_FILE 1
++#ifdef DEBUG_WRITE_REG_FROM_FILE
++#include <linux/kernel_read_file.h>
++#endif
++
+ #include <asm/unaligned.h>
+ #include <linux/acpi.h>
+ #include <linux/clk.h>
+@@ -310,7 +315,7 @@ static const struct ov2740_link_freq_config link_freq_configs[] = {
+ 	},
+ };
+ 
+-static const struct ov2740_mode supported_modes[] = {
++static struct ov2740_mode supported_modes[] = {
+ 	{
+ 		.width = 1932,
+ 		.height = 1092,
+@@ -339,7 +344,7 @@ struct ov2740 {
+ 	struct v4l2_ctrl *exposure;
+ 
+ 	/* Current mode */
+-	const struct ov2740_mode *cur_mode;
++	struct ov2740_mode *cur_mode;
+ 
+ 	/* To serialize asynchronus callbacks */
+ 	struct mutex mutex;
+@@ -454,6 +459,169 @@ static int ov2740_write_reg_list(struct ov2740 *ov2740,
+ 	return 0;
+ }
+ 
++#ifdef DEBUG_WRITE_REG_FROM_FILE
++static int DEBUG_write_reg_from_file(struct ov2740 *ov2740,
++				     const char *fn) {
++	struct i2c_client *client = v4l2_get_subdevdata(&ov2740->sd);
++	/* FILE *fp; */
++	void *buf;
++	char *cbuf;
++	char line[1024];
++	int linelen;
++	char sreg[16], slen[16], sval[32];
++	u16 reg, len;
++	u32 val;
++	int ret = 0;
++
++	buf = 0;
++	ret = kernel_read_file_from_path(fn, 0, &buf, INT_MAX, NULL,
++					 READING_FIRMWARE);
++	if (ret < 0)
++		return 0;
++	cbuf = buf;
++	cbuf[ret] = 0;
++
++	while (*cbuf) {
++		sscanf(cbuf, "%1023[^\n]\n%n", line, &linelen);
++		cbuf += linelen;
++
++		sscanf(line, "%15s%15s%31s\n", sreg, slen, sval);
++		if(kstrtou16(sreg, 0, &reg))
++			continue;
++		if(kstrtou16(slen, 0, &len) || len < 1 || len > 4)
++			continue;
++		if(kstrtou32(sval, 0, &val))
++			continue;
++		val &= ((1 << (8*len)) - 1);
++
++		printk("%s(): 0x%04x <- 0x%.*x", __func__, reg, 2*len, val);
++
++		ret = ov2740_write_reg(ov2740, reg, len, val);
++		if (ret) {
++			dev_err_ratelimited(&client->dev,
++					    "write reg 0x%4.4x return err = %d",
++					    reg, ret);
++			return ret;
++		}
++	}
++
++	vfree(buf);
++	return 0;
++}
++
++static int DEBUG_set_mode_from_file(struct ov2740 *ov2740,
++				    const char *fn,
++				    struct ov2740_mode *mode) {
++	void *buf;
++	char *cbuf;
++	char line[1024];
++	int linelen;
++	char sval[32];
++	u32 val;
++	int ret = 0;
++	int count;
++
++	buf = 0;
++	ret = kernel_read_file_from_path(fn, 0, &buf, INT_MAX, NULL,
++					 READING_FIRMWARE);
++	if (ret < 0)
++		return 0;
++	cbuf = buf;
++	cbuf[ret] = 0;
++
++	count = 0;
++	while (*cbuf) {
++		sscanf(cbuf, "%1023[^\n]\n%n", line, &linelen);
++		cbuf += linelen;
++
++		sscanf(line, "%32s\n", sval);
++		if(kstrtou32(sval, 0, &val))
++			continue;
++		if(count == 0) {
++		  printk("set mode->width = %d", val);
++		  mode->width = val;
++		}
++		if(count == 1) {
++		  printk("set mode->height = %d", val);
++		  mode->height = val;
++		}
++		if(count == 2) {
++		  printk("set mode->hts = %d", val);
++		  mode->hts = val;
++		}
++		if(count == 3) {
++		  printk("set mode->vts_def = %d", val);
++		  mode->vts_def = val;
++		}
++		if(count == 4) {
++		  printk("set mode->vts_min = %d", val);
++		  mode->vts_min = val;
++		}
++		if(count == 5) {
++		  printk("set mode->link_freq_index = %d", val);
++		  mode->link_freq_index = val;
++		}
++
++		++count;
++	}
++
++	vfree(buf);
++	return 0;
++}
++
++static int DEBUG_set_crop_from_file(struct ov2740 *ov2740,
++				    const char *fn,
++				    struct v4l2_subdev_selection *sel) {
++	void *buf;
++	char *cbuf;
++	char line[1024];
++	int linelen;
++	char sval[32];
++	u32 val;
++	int ret = 0;
++	int count;
++
++	buf = 0;
++	ret = kernel_read_file_from_path(fn, 0, &buf, INT_MAX, NULL,
++					 READING_FIRMWARE);
++	if (ret < 0)
++		return 0;
++	cbuf = buf;
++	cbuf[ret] = 0;
++
++	count = 0;
++	while (*cbuf) {
++		sscanf(cbuf, "%1023[^\n]\n%n", line, &linelen);
++		cbuf += linelen;
++
++		sscanf(line, "%32s\n", sval);
++		if(kstrtou32(sval, 0, &val))
++			continue;
++		if(count == 0) {
++		  printk("set sel->r.top = %d", val);
++		  sel->r.top = val;
++		}
++		if(count == 1) {
++		  printk("set sel->r.left = %d", val);
++		  sel->r.left = val;
++		}
++		if(count == 2) {
++		  printk("set sel->r.width = %d", val);
++		  sel->r.width = val;
++		}
++		if(count == 3) {
++		  printk("set sel->r.height = %d", val);
++		  sel->r.height = val;
++		}
++
++		++count;
++	}
++
++	vfree(buf);
++	return 0;
++}
++#endif
++
+ static int ov2740_update_digital_gain(struct ov2740 *ov2740, u32 d_gain)
+ {
+ 	int ret = 0;
+@@ -600,7 +768,7 @@ static int ov2740_init_controls(struct ov2740 *ov2740)
+ {
+ 	struct v4l2_fwnode_device_properties props;
+ 	struct v4l2_ctrl_handler *ctrl_hdlr;
+-	const struct ov2740_mode *cur_mode;
++	struct ov2740_mode *cur_mode;
+ 	s64 exposure_max, h_blank, pixel_rate;
+ 	u32 vblank_min, vblank_max, vblank_default;
+ 	int size;
+@@ -681,7 +849,7 @@ static int ov2740_init_controls(struct ov2740 *ov2740)
+ 	return 0;
+ }
+ 
+-static void ov2740_update_pad_format(const struct ov2740_mode *mode,
++static void ov2740_update_pad_format(struct ov2740_mode *mode,
+ 				     struct v4l2_mbus_framefmt *fmt)
+ {
+ 	fmt->width = mode->width;
+@@ -811,6 +979,14 @@ static int ov2740_start_streaming(struct ov2740 *ov2740)
+ 		return ret;
+ 	}
+ 
++#ifdef DEBUG_WRITE_REG_FROM_FILE
++	ret = DEBUG_write_reg_from_file(ov2740, "/ov2740.reg");
++	if (ret) {
++		dev_err(&client->dev, "failed to apply regs from /ov2740.reg");
++		return ret;
++	}
++#endif
++
+ 	ret = __v4l2_ctrl_handler_setup(ov2740->sd.ctrl_handler);
+ 	if (ret)
+ 		return ret;
+@@ -959,6 +1135,9 @@ static int __maybe_unused ov2740_powerup(struct device *dev)
+ 
+ 	usleep_range(4000, 8000);
+ 
++	ov2740->cur_mode = &supported_modes[0];
++	DEBUG_set_mode_from_file(ov2740, "/ov2740.mode", ov2740->cur_mode);
++
+ 	return 0;
+ 
+ err_powerdown:
+@@ -971,9 +1150,11 @@ static int ov2740_set_format(struct v4l2_subdev *sd,
+ 			     struct v4l2_subdev_format *fmt)
+ {
+ 	struct ov2740 *ov2740 = to_ov2740(sd);
+-	const struct ov2740_mode *mode;
++	struct ov2740_mode *mode;
+ 	s32 vblank_def, h_blank;
+ 
++	printk("set format called");
++
+ 	mode = v4l2_find_nearest_size(supported_modes,
+ 				      ARRAY_SIZE(supported_modes), width,
+ 				      height, fmt->format.width,
+@@ -1059,6 +1240,13 @@ static int ov2740_get_selection(struct v4l2_subdev *sd,
+ 								struct v4l2_subdev_state *state,
+ 								struct v4l2_subdev_selection *sel)
+ {
++	printk("%s(): sel->target = %d", __func__, sel->target);
++	printk("  (NATIVE: %d, CROP: %d, CROP_BOUNDS: %d, CROP_DEFAULT: %d)",
++	       V4L2_SEL_TGT_NATIVE_SIZE,
++	       V4L2_SEL_TGT_CROP,
++	       V4L2_SEL_TGT_CROP_BOUNDS,
++	       V4L2_SEL_TGT_CROP_DEFAULT);
++
+ 	switch (sel->target) {
+ 	case V4L2_SEL_TGT_NATIVE_SIZE:
+ 		sel->r.top = OV2740_NATIVE_START_TOP;
+@@ -1078,6 +1266,8 @@ static int ov2740_get_selection(struct v4l2_subdev *sd,
+ 		return -EINVAL;
+ 	}
+ 
++	DEBUG_set_crop_from_file(0, "/ov2740.crop", sel);
++
+ 	return 0;
+ }
+ 
+@@ -1391,6 +1581,8 @@ static int ov2740_probe(struct i2c_client *client)
+ 
+ 	mutex_init(&ov2740->mutex);
+ 	ov2740->cur_mode = &supported_modes[0];
++	DEBUG_set_mode_from_file(ov2740, "/ov2740.mode", ov2740->cur_mode);
++
+ 	ret = ov2740_init_controls(ov2740);
+ 	if (ret) {
+ 		dev_err(&client->dev, "failed to init controls: %d", ret);
+-- 
+2.36.0
+
